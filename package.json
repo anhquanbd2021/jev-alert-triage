@@ -1,0 +1,15 @@
+{
+  "name": "jev-alert-triage-demo",
+  "version": "1.0.0",
+  "description": "Companion demo: replay alerts through the enrich -> decide -> route pipeline and watch runtime context override last year's YAML severity.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node app/server.js",
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

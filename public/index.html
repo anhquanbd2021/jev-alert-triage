@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alert Triage Lab</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --ink:#e6edf3; --mut:#8b949e; --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui,sans-serif; }
+  main { max-width:980px; margin:0 auto; padding:24px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mut); margin-bottom:20px; }
+  .alerts { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; margin-bottom:20px; }
+  .al { background:var(--card); border:1px solid #30363d; border-radius:10px; padding:12px 14px; cursor:pointer; }
+  .al:hover { border-color:var(--acc); }
+  .al.sel { border-color:var(--acc); box-shadow:0 0 0 1px var(--acc); }
+  .al .sev { font-size:12px; color:var(--warn); }
+  .al h3 { margin:0 0 4px; font-size:15px; }
+  .al p { margin:0; color:var(--mut); font-size:12.5px; }
+  .panel { background:var(--card); border:1px solid #30363d; border-radius:10px; padding:16px; margin-bottom:16px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:760px){ .cols { grid-template-columns:1fr } }
+  pre { background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:10px; overflow:auto; font-size:12.5px; margin:0; }
+  .bar { display:flex; align-items:center; gap:8px; margin:3px 0; font-size:13px; }
+  .bar .lbl { width:44px; color:var(--mut); }
+  .bar .fill { height:10px; border-radius:5px; background:var(--acc); min-width:2px; }
+  .bar .val { color:var(--mut); font-family:ui-monospace,monospace; font-size:12px; }
+  .route { font-size:15px; margin-top:10px; }
+  .route b { color:var(--acc); }
+  .delta { font-weight:700; }
+  .delta.same { color:var(--mut); } .delta.down { color:var(--ok); } .delta.up { color:var(--bad); }
+  table.cmp { width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.cmp th, table.cmp td { padding:6px 10px; border-bottom:1px solid #21262d; text-align:left; }
+  table.cmp th { color:var(--mut); font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Alert Triage Lab</h1>
+  <p class="sub">Same firing condition, different runtime context. The YAML picked <b>critical</b> for all of them a year ago — watch the decision layer disagree.</p>
+  <div class="alerts" id="alerts"></div>
+  <div class="panel" id="panel" hidden>
+    <div class="cols">
+      <div>
+        <h3 style="margin:0 0 8px;font-size:14px;color:var(--mut)">state → /v1/systemone</h3>
+        <pre id="state"></pre>
+      </div>
+      <div>
+        <h3 style="margin:0 0 8px;font-size:14px;color:var(--mut)">answers + routing policy</h3>
+        <div id="answers"></div>
+        <div class="route" id="route"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="replay"></div>
+</main>
+<script type="module">
+  const alertsEl = document.getElementById('alerts');
+  const panel = document.getElementById('panel');
+  const alerts = await (await fetch('/api/alerts')).json();
+
+  const cards = alerts.map(a => {
+    const d = document.createElement('div');
+    d.className = 'al';
+    d.innerHTML = `<div class="sev">YAML said: ${a.staticSeverity}</div><h3>${a.name}</h3><p>${a.raw}</p><p>${a.id.replace('a-','')}</p>`;
+    d.onclick = () => { cards.forEach(c => c.classList.toggle('sel', c === d)); show(a.id); };
+    alertsEl.appendChild(d);
+    return d;
+  });
+
+  async function show(id) {
+    const r = await (await fetch('/api/triage?id=' + id)).json();
+    panel.hidden = false;
+    document.getElementById('state').textContent = JSON.stringify(r.state, null, 2);
+    const sev = r.answers.severity;
+    const top = Object.entries(sev).sort((a,b)=>b[1]-a[1])[0][0];
+    document.getElementById('answers').innerHTML =
+      ['p1','p2','p3'].map(k => `<div class="bar"><span class="lbl">${k}</span><div class="fill" style="width:${sev[k]*220}px;${k===top?'outline:1px solid var(--acc)':''}"></div><span class="val">${sev[k]}</span></div>`).join('') +
+      `<div class="bar"><span class="lbl">conf</span><div class="fill" style="width:${r.answers.confidence*220}px;background:var(--warn)"></div><span class="val">${r.answers.confidence}</span></div>` +
+      `<div class="bar"><span class="lbl">page</span><div class="fill" style="width:${r.answers.pageable*220}px;background:var(--bad)"></div><span class="val">${r.answers.pageable}</span></div>` +
+      `<div class="bar"><span class="lbl">team</span><span class="val">${Object.entries(r.answers.team).sort((a,b)=>b[1]-a[1])[0][0]}</span></div>`;
+    const same = top === r.staticSeverity ? 'same' : (top === 'p1' ? 'up' : 'down');
+    const arrow = same === 'same' ? 'kept' : same === 'up' ? 'ESCALATED' : 'downgraded';
+    document.getElementById('route').innerHTML =
+      `severity <b>${top}</b> <span class="delta ${same}">(${arrow} vs static ${r.staticSeverity})</span> → action <b>${r.route.action}</b> → ${r.route.target}`;
+  }
+
+  // replay table
+  const replay = await (await fetch('/api/replay')).json();
+  document.getElementById('replay').innerHTML =
+    `<h3 style="margin:0 0 8px;font-size:14px;color:var(--mut)">replay: all four alerts through the decision layer</h3>` +
+    `<table class="cmp"><tr><th>context</th><th>YAML severity</th><th>decision</th><th>confidence</th><th>pageable</th><th>route</th></tr>` +
+    replay.map(r => {
+      const top = Object.entries(r.answers.severity).sort((a,b)=>b[1]-a[1])[0][0];
+      return `<tr><td>${r.alert.id.replace('a-','')}</td><td>${r.staticSeverity}</td><td><b>${top}</b></td><td>${r.answers.confidence}</td><td>${r.answers.pageable}</td><td>${r.route.action} → ${r.route.target}</td></tr>`;
+    }).join('') + `</table>`;
+</script>
+</body>
+</html>

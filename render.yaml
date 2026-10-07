@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: jev-alert-triage
+    runtime: node
+    plan: free
+    buildCommand: npm run check
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
